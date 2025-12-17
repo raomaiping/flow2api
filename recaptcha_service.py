@@ -74,6 +74,7 @@ class RecaptchaService:
         self.playwright = None
         self.browser: Optional[Browser] = None
         self._lock = asyncio.Lock()  # 用于并发控制
+        self._semaphore = asyncio.Semaphore(5)  # 限制并发请求数量，避免资源耗尽
         self.website_key = "6LdsFiUsAAAAAIjVDZcuLhaHiDn5nnHVXVRQGeMV"
         self._initialized = False
     
@@ -104,7 +105,7 @@ class RecaptchaService:
                 debug_logger.log_error(f"[RecaptchaService] ❌ 浏览器启动失败: {str(e)}")
                 raise
     
-    async def get_token(self, project_id: str) -> Optional[str]:
+    async def get_token(self, project_id: str) -> tuple[Optional[str], Optional[str]]:
         """获取 reCAPTCHA token（复用浏览器实例）
         
         Args:
@@ -116,138 +117,125 @@ class RecaptchaService:
         if not self._initialized:
             await self.initialize()
         
-        start_time = time.time()
-        
-        try:
-            # 创建新的上下文（每次请求都创建新的上下文，类似新的浏览器会话）
-            context: BrowserContext = await self.browser.new_context(
-                viewport={'width': 1920, 'height': 1080},
-                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                locale='en-US',
-                timezone_id='America/New_York'
-            )
-            page = await context.new_page()
+        # 使用信号量限制并发
+        async with self._semaphore:
+            start_time = time.time()
             
-            website_url = f"https://labs.google/fx/tools/flow/project/{project_id}"
-            
-            debug_logger.log_info(f"[RecaptchaService] 访问页面: {website_url}")
-            
-            # 访问页面
             try:
-                await page.goto(website_url, wait_until="domcontentloaded", timeout=30000)
-            except Exception as e:
-                debug_logger.log_warning(f"[RecaptchaService] 页面加载超时或失败: {str(e)}")
-            
-            # 检查并注入 reCAPTCHA v3 脚本（如果页面没有加载）
-            debug_logger.log_info("[RecaptchaService] 检查并加载 reCAPTCHA v3 脚本...")
-            script_loaded = await page.evaluate(f"""
-                () => {{
-                    if (window.grecaptcha && typeof window.grecaptcha.execute === 'function') {{
-                        return true;
-                    }}
-                    return false;
-                }}
-            """)
-            
-            if not script_loaded:
-                # 如果没有加载，注入脚本
-                debug_logger.log_info("[RecaptchaService] 注入 reCAPTCHA v3 脚本...")
-                await page.evaluate(f"""
-                    () => {{
-                        return new Promise((resolve) => {{
-                            const script = document.createElement('script');
-                            script.src = 'https://www.google.com/recaptcha/api.js?render={self.website_key}';
-                            script.async = true;
-                            script.defer = true;
-                            script.onload = () => resolve(true);
-                            script.onerror = () => resolve(false);
-                            document.head.appendChild(script);
-                        }});
-                    }}
-                """)
-            
-            # 等待reCAPTCHA加载和初始化
-            debug_logger.log_info("[RecaptchaService] 等待reCAPTCHA初始化...")
-            for i in range(20):  # 最多等待20秒
-                grecaptcha_ready = await page.evaluate("""
-                    () => {
-                        return window.grecaptcha && 
-                               typeof window.grecaptcha.execute === 'function';
-                    }
-                """)
-                if grecaptcha_ready:
-                    debug_logger.log_info(f"[RecaptchaService] reCAPTCHA 已准备好（等待了 {i*0.5} 秒）")
-                    break
-                await asyncio.sleep(0.5)
-            else:
-                debug_logger.log_warning("[RecaptchaService] reCAPTCHA 初始化超时，继续尝试执行...")
-            
-            # 额外等待一下确保完全初始化
-            await page.wait_for_timeout(1000)
-            
-            # 执行reCAPTCHA并获取token
-            debug_logger.log_info("[RecaptchaService] 执行reCAPTCHA验证...")
-            token = await page.evaluate("""
-                async (websiteKey) => {
-                    try {
-                        // 检查 grecaptcha 是否存在且有 execute 方法
-                        if (!window.grecaptcha) {
-                            console.error('[RecaptchaService] window.grecaptcha 不存在');
-                            return null;
-                        }
-                        
-                        if (typeof window.grecaptcha.execute !== 'function') {
-                            console.error('[RecaptchaService] window.grecaptcha.execute 不是函数');
-                            return null;
-                        }
-                        
-                        // 确保grecaptcha已准备好
-                        await new Promise((resolve, reject) => {
-                            const timeout = setTimeout(() => {
-                                reject(new Error('reCAPTCHA加载超时'));
-                            }, 15000);
-                            
-                            if (window.grecaptcha && window.grecaptcha.ready) {
-                                window.grecaptcha.ready(() => {
-                                    clearTimeout(timeout);
-                                    resolve();
-                                });
-                            } else {
-                                clearTimeout(timeout);
-                                resolve();
-                            }
-                        });
-                        
-                        // 执行reCAPTCHA v3
-                        const token = await window.grecaptcha.execute(websiteKey, {
-                            action: 'FLOW_GENERATION'
-                        });
-                        
-                        return token;
-                    } catch (error) {
-                        console.error('[RecaptchaService] reCAPTCHA执行错误:', error);
-                        return null;
-                    }
-                }
-            """, self.website_key)
-            
-            # 关闭上下文（但保持浏览器运行）
-            await context.close()
-            
-            duration_ms = (time.time() - start_time) * 1000
-            
-            if token:
-                debug_logger.log_info(f"[RecaptchaService] ✅ Token获取成功（耗时 {duration_ms:.0f}ms）")
-                return token
-            else:
-                debug_logger.log_error("[RecaptchaService] Token获取失败（返回null）")
-                return None
+                # 创建新的上下文（每次请求都创建新的上下文，类似新的浏览器会话）
+                context: BrowserContext = await self.browser.new_context(
+                    viewport={'width': 1920, 'height': 1080},
+                    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    locale='en-US',
+                    timezone_id='America/New_York'
+                )
+                page = await context.new_page()
                 
-        except Exception as e:
-            debug_logger.log_error(f"[RecaptchaService] 获取token异常: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            return None
+                website_url = f"https://labs.google/fx/tools/flow/project/{project_id}"
+                
+                debug_logger.log_info(f"[RecaptchaService] 访问页面: {website_url}")
+                
+                # 优化1: 在页面加载前就注入reCAPTCHA脚本，减少等待时间
+                await page.add_init_script(f"""
+                    (function() {{
+                        const script = document.createElement('script');
+                        script.src = 'https://www.google.com/recaptcha/api.js?render={self.website_key}';
+                        script.async = true;
+                        script.defer = true;
+                        document.head.appendChild(script);
+                    }})();
+                """)
+                
+                # 优化2: 使用更轻量级的等待策略，不需要等待完整页面加载
+                try:
+                    await page.goto(website_url, wait_until="domcontentloaded", timeout=20000)
+                except Exception as e:
+                    debug_logger.log_warning(f"[RecaptchaService] 页面加载超时或失败: {str(e)}")
+                    # 即使页面加载失败，也继续尝试（可能脚本已注入）
+                
+                # 优化3: 使用 wait_for_function 替代轮询，更高效
+                debug_logger.log_info("[RecaptchaService] 等待reCAPTCHA初始化...")
+                try:
+                    await page.wait_for_function(
+                        """() => {
+                            return window.grecaptcha && 
+                                   typeof window.grecaptcha.execute === 'function';
+                        }""",
+                        timeout=15000  # 最多等待15秒
+                    )
+                    debug_logger.log_info("[RecaptchaService] reCAPTCHA 已准备好")
+                except Exception as e:
+                    debug_logger.log_warning(f"[RecaptchaService] reCAPTCHA初始化超时: {str(e)}")
+                    # 继续尝试执行，可能已经准备好了
+            
+                # 优化4: 简化执行逻辑，减少不必要的等待
+                debug_logger.log_info("[RecaptchaService] 执行reCAPTCHA验证...")
+                token = await page.evaluate("""
+                    async (websiteKey) => {
+                        try {
+                            // 检查 grecaptcha 是否存在且有 execute 方法
+                            if (!window.grecaptcha) {
+                                return {error: 'window.grecaptcha 不存在'};
+                            }
+                            
+                            if (typeof window.grecaptcha.execute !== 'function') {
+                                return {error: 'window.grecaptcha.execute 不是函数'};
+                            }
+                            
+                            // 优化：如果 ready 存在，等待它，否则直接执行（减少等待时间）
+                            if (window.grecaptcha.ready && typeof window.grecaptcha.ready === 'function') {
+                                await new Promise((resolve, reject) => {
+                                    const timeout = setTimeout(() => resolve(), 5000); // 最多等待5秒
+                                    window.grecaptcha.ready(() => {
+                                        clearTimeout(timeout);
+                                        resolve();
+                                    });
+                                });
+                            }
+                            
+                            // 执行reCAPTCHA v3
+                            const token = await window.grecaptcha.execute(websiteKey, {
+                                action: 'FLOW_GENERATION'
+                            });
+                            
+                            return {token: token};
+                        } catch (error) {
+                            return {error: error.message || String(error)};
+                        }
+                    }
+                """, self.website_key)
+                
+                # 关闭上下文（但保持浏览器运行）
+                await context.close()
+                
+                duration_ms = (time.time() - start_time) * 1000
+                
+                # 处理返回结果
+                if isinstance(token, dict):
+                    if 'token' in token and token['token']:
+                        debug_logger.log_info(f"[RecaptchaService] ✅ Token获取成功（耗时 {duration_ms:.0f}ms）")
+                        return token['token'], None
+                    else:
+                        error_msg = token.get('error', 'Unknown error')
+                        error_detail = f"reCAPTCHA执行失败: {error_msg}"
+                        debug_logger.log_error(f"[RecaptchaService] Token获取失败: {error_detail}，耗时 {duration_ms:.0f}ms")
+                        return None, error_detail
+                else:
+                    # 兼容旧格式（字符串token）
+                    if token:
+                        debug_logger.log_info(f"[RecaptchaService] ✅ Token获取成功（耗时 {duration_ms:.0f}ms）")
+                        return token, None
+                    else:
+                        error_detail = "Token获取失败，可能原因：reCAPTCHA脚本未加载、页面加载超时、或网络问题"
+                        debug_logger.log_error(f"[RecaptchaService] Token获取失败（返回null），耗时 {duration_ms:.0f}ms")
+                        return None, error_detail
+                    
+            except Exception as e:
+                error_detail = f"获取token异常: {str(e)}"
+                debug_logger.log_error(f"[RecaptchaService] {error_detail}")
+                import traceback
+                traceback.print_exc()
+                return None, error_detail
     
     async def close(self):
         """关闭浏览器和Playwright"""
@@ -290,6 +278,7 @@ class TokenResponse(BaseModel):
     token: Optional[str] = None
     duration_ms: Optional[float] = None
     error: Optional[str] = None
+    error_detail: Optional[str] = None  # 详细错误信息
 
 
 @asynccontextmanager
@@ -382,7 +371,7 @@ async def get_token(request: TokenRequest):
     
     try:
         service = await get_service()
-        token = await service.get_token(request.project_id)
+        token, error_detail = await service.get_token(request.project_id)
         
         duration_ms = (time.time() - start_time) * 1000
         
@@ -396,6 +385,7 @@ async def get_token(request: TokenRequest):
             return TokenResponse(
                 success=False,
                 error="Failed to get token",
+                error_detail=error_detail,
                 duration_ms=duration_ms
             )
     except Exception as e:
