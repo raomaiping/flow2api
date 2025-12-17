@@ -35,7 +35,7 @@
 
 ```bash
 # 克隆项目
-git clone https://github.com/TheSmallHanCat/flow2api.git
+git clone https://github.com/raomaiping/flow2api.git
 cd flow2api
 
 # 启动服务
@@ -59,7 +59,7 @@ docker-compose -f docker-compose.warp.yml logs -f
 
 ```bash
 # 克隆项目
-git clone https://github.com/TheSmallHanCat/flow2api.git
+git clone https://github.com/raomaiping/flow2api.git
 cd sora2api
 
 # 创建虚拟环境
@@ -252,8 +252,8 @@ curl -X POST "http://localhost:8000/v1/chat/completions" \
 
 ## 📞 联系方式
 
-- 提交 Issue：[GitHub Issues](https://github.com/TheSmallHanCat/flow2api/issues)
-- 讨论：[GitHub Discussions](https://github.com/TheSmallHanCat/flow2api/discussions)
+- 提交 Issue：[GitHub Issues](https://github.com/raomaiping/flow2api/issues)
+- 讨论：[GitHub Discussions](https://github.com/raomaiping/flow2api/discussions)
 
 ---
 
@@ -261,4 +261,4 @@ curl -X POST "http://localhost:8000/v1/chat/completions" \
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=TheSmallHanCat/flow2api&type=date&legend=top-left)](https://www.star-history.com/#TheSmallHanCat/flow2api&type=date&legend=top-left)
+[![Star History Chart](https://api.star-history.com/svg?repos=raomaiping/flow2api&type=date&legend=top-left)](https://www.star-history.com/#raomaiping/flow2api&type=date&legend=top-left)
