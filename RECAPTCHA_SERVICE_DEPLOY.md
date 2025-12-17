@@ -2,7 +2,7 @@
 
 ## 概述
 
-reCAPTCHA Token Service 已配置为自动构建和部署 Docker 镜像到 Docker Hub。
+reCAPTCHA Token Service 已配置为自动构建和部署 Docker 镜像到 GitHub Container Registry (ghcr.io)。
 
 ## 触发条件
 
@@ -272,7 +272,7 @@ docker run -d \
 ### 镜像构建失败
 
 1. 检查 GitHub Actions 日志
-2. 确认 Docker Hub secrets 配置正确
+2. 确认 GitHub Actions 有 `packages: write` 权限（工作流中已配置）
 3. 检查 Dockerfile 语法
 
 ### 容器启动失败
