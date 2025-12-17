@@ -1,0 +1,9 @@
+# reCAPTCHA Token Service 的额外依赖
+# 仅在需要使用自实现 reCAPTCHA 服务时安装
+
+# 基础依赖（从主 requirements.txt）
+-r requirements.txt
+
+# Playwright（用于浏览器自动化）
+playwright>=1.40.0
+
