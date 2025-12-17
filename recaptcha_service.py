@@ -135,23 +135,41 @@ class RecaptchaService:
                 
                 debug_logger.log_info(f"[RecaptchaService] 访问页面: {website_url}")
                 
-                # 优化1: 在页面加载前就注入reCAPTCHA脚本，减少等待时间
-                await page.add_init_script(f"""
-                    (function() {{
-                        const script = document.createElement('script');
-                        script.src = 'https://www.google.com/recaptcha/api.js?render={self.website_key}';
-                        script.async = true;
-                        script.defer = true;
-                        document.head.appendChild(script);
-                    }})();
-                """)
-                
-                # 优化2: 使用更轻量级的等待策略，不需要等待完整页面加载
+                # 访问页面
                 try:
                     await page.goto(website_url, wait_until="domcontentloaded", timeout=20000)
                 except Exception as e:
                     debug_logger.log_warning(f"[RecaptchaService] 页面加载超时或失败: {str(e)}")
-                    # 即使页面加载失败，也继续尝试（可能脚本已注入）
+                
+                # 检查并注入 reCAPTCHA v3 脚本（如果页面没有加载）
+                debug_logger.log_info("[RecaptchaService] 检查并加载 reCAPTCHA v3 脚本...")
+                script_loaded = await page.evaluate(f"""
+                    () => {{
+                        if (window.grecaptcha && typeof window.grecaptcha.execute === 'function') {{
+                            return true;
+                        }}
+                        return false;
+                    }}
+                """)
+                
+                if not script_loaded:
+                    # 如果没有加载，注入脚本并等待加载完成
+                    debug_logger.log_info("[RecaptchaService] 注入 reCAPTCHA v3 脚本...")
+                    script_injected = await page.evaluate(f"""
+                        () => {{
+                            return new Promise((resolve) => {{
+                                const script = document.createElement('script');
+                                script.src = 'https://www.google.com/recaptcha/api.js?render={self.website_key}';
+                                script.async = true;
+                                script.defer = true;
+                                script.onload = () => resolve(true);
+                                script.onerror = () => resolve(false);
+                                document.head.appendChild(script);
+                            }});
+                        }}
+                    """)
+                    if not script_injected:
+                        debug_logger.log_warning("[RecaptchaService] reCAPTCHA 脚本注入可能失败")
                 
                 # 优化3: 使用 wait_for_function 替代轮询，更高效
                 # 如果超时，再使用轮询作为后备方案，确保在远程环境也能正常工作
