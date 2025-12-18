@@ -35,9 +35,10 @@ RUN apt-get update -o Acquire::Check-Valid-Until=false || true && \
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt && \
-    pip install --no-cache-dir playwright>=1.40.0 && \
-    playwright install chromium && \
-    playwright install-deps chromium
+    pip install --no-cache-dir playwright>=1.40.0
+
+# 安装 Playwright 浏览器（会自动安装系统依赖）
+RUN playwright install chromium
 
 # 复制项目文件
 COPY . .
