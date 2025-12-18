@@ -4,16 +4,21 @@ reCAPTCHA Token 服务（内部集成版本）
 直接在主服务中使用，无需独立的 HTTP 服务
 复用浏览器实例，提供高性能的 reCAPTCHA token 获取
 """
+from __future__ import annotations
+
 import asyncio
-from typing import Optional, Dict, Tuple
+from typing import Optional, Dict, Tuple, TYPE_CHECKING
 import time
 import sys
+
+if TYPE_CHECKING:
+    from playwright.async_api import Route
 
 try:
     from playwright.async_api import async_playwright, Browser, BrowserContext, Page, Playwright, Route
 except ImportError:
     # Playwright 未安装时，会在使用时抛出错误
-    pass
+    Route = None  # 类型检查时使用
 
 from ..core.logger import debug_logger
 
@@ -131,7 +136,7 @@ class RecaptchaService:
                 debug_logger.log_error(f"[RecaptchaService] ❌ 浏览器启动失败: {str(e)}")
                 raise
     
-    async def _route_handler(self, route: Route) -> None:
+    async def _route_handler(self, route: "Route") -> None:
         """路由处理器：拦截并阻止不必要的资源加载"""
         request = route.request
         resource_type = request.resource_type
