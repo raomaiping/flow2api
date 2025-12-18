@@ -54,17 +54,15 @@ ERROR: failed to build: failed to solve: failed to push ghcr.io/raomaiping/flow2
 
 ### 3. 验证 workflow 文件权限配置
 
-确保 `.github/workflows/docker-build.yml` 中包含以下权限配置：
+**重要：如果仓库已设置 "Read and write permissions"，则不需要在 workflow 中显式声明权限！**
 
-```yaml
-permissions:
-  contents: write
-  packages: write
-  attestations: write
-  id-token: write
-```
+显式声明权限可能会覆盖仓库的默认权限设置，导致权限不足。
 
-✅ 已更新 workflow 文件，包含上述权限。
+**推荐做法：**
+- 如果仓库设置了 "Read and write permissions"：**移除 workflow 中的 `permissions` 声明**，让使用默认权限
+- 如果仓库设置了 "Read repository contents and packages permissions"：需要在 workflow 中显式声明 `packages: write`
+
+✅ 已更新 workflow 文件，移除了显式权限声明，使用仓库默认权限。
 
 ### 4. 如果问题仍然存在
 
